@@ -1,12 +1,12 @@
 // Trage hier deine eigenen Firebase-Projektdaten ein.
 // Firebase Console -> Projekteinstellungen -> "Meine Apps" -> Web-App -> Konfiguration
 const firebaseConfig = {
-  apiKey: "DEIN_API_KEY",
-  authDomain: "DEIN_PROJEKT.firebaseapp.com",
-  projectId: "DEIN_PROJEKT",
-  storageBucket: "DEIN_PROJEKT.appspot.com",
-  messagingSenderId: "DEINE_SENDER_ID",
-  appId: "DEINE_APP_ID"
+  apiKey: "AIzaSyBza63G76GPH5LTIHunOjfh5nB9_e7jGio",
+  authDomain: "mrb--onlinebefehl.firebaseapp.com",
+  projectId: "mrb--onlinebefehl",
+  storageBucket: "mrb--onlinebefehl.firebasestorage.app",
+  messagingSenderId: "1035944360107",
+  appId: "1:1035944360107:web:ebd0af1a8832034a639fee"
 };
 
 firebase.initializeApp(firebaseConfig);
