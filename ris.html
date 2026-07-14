@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Online Fahrplan</title>
+<meta name="theme-color" content="#14171b">
+<link rel="icon" href="icons/favicon-32.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/ris.css">
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="icons/icon-192.png" alt="" class="brand-mark">
+      <div>
+        <h1>Online Fahrplan</h1>
+        <p>Bahnhöfe · Fahrten · Meldungen</p>
+      </div>
+    </div>
+
+    <nav class="mainnav">
+      <a onclick="location.hash='#/uebersicht'">Übersicht</a>
+      <a href="index.html">← Online Befehl</a>
+      <a onclick="logout()">Abmelden</a>
+    </nav>
+
+    <div id="dispoBox" class="hidden" style="margin-top:auto;">
+      <label class="dispo-toggle">
+        <input type="checkbox" id="dispoToggle">
+        <span>Dispo-Modus</span>
+      </label>
+      <p class="dispo-hint">Im Dispo-Modus kannst du Anschlüsse als „wartet" oder „nicht" disponieren.</p>
+    </div>
+
+    <div id="userBadge" class="user-badge hidden">
+      <div class="user-badge-name" id="userBadgeName"></div>
+      <span id="userBadgeRole" class="role-pill"></span>
+    </div>
+  </aside>
+
+  <main id="app" class="app"></main>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/ris.js"></script>
+</body>
+</html>
