@@ -9,18 +9,20 @@ const STATUS_LABEL = {
 };
 
 const NAV_ITEMS = [
-  { hash: "#/start", label: "Start", roles: ["tf", "fdl", "hr"] },
-  { hash: "#/erstellen", label: "Befehl erstellen", roles: ["fdl", "hr"] },
-  { hash: "#/alle", label: "Alle Befehle", roles: ["fdl", "hr"] },
-  { hash: "#/archiv", label: "Archiv", roles: ["hr"] },
-  { hash: "#/benutzer", label: "Benutzer", roles: ["hr"] },
-  { hash: "#/abrufen", label: "Befehl abrufen", roles: ["tf", "hr"] },
-  { hash: "#/meine", label: "Meine Befehle", roles: ["tf", "fdl", "hr"] },
+  { hash: "#/start", label: "Start", roles: ["tf", "fdl", "hr"], desc: "Übersicht und Rollen-Erklärung." },
+  { hash: "#/erstellen", label: "Befehl erstellen", roles: ["fdl", "hr"], desc: "Neuen Befehl anlegen und sofort freigeben." },
+  { hash: "#/alle", label: "Alle Befehle", roles: ["fdl", "hr"], desc: "Alle laufenden und abgeschlossenen Befehle einsehen." },
+  { hash: "#/archiv", label: "Archiv", roles: ["hr"], desc: "Alle Befehle schreibgeschützt mit aktuellem Stand einsehen." },
+  { hash: "#/benutzer", label: "Benutzer", roles: ["hr"], desc: "Benutzerkonten anlegen und verwalten." },
+  { hash: "#/abrufen", label: "Befehl abrufen", roles: ["tf", "hr"], desc: "Einen Befehl per Zugnummer und Zugriffscode abrufen." },
+  { hash: "#/meine", label: "Meine Befehle", roles: ["fdl"], desc: "Die von dir erstellten Befehle einsehen." },
 ];
 
 let currentUser = null;
 let currentProfile = null;
 let allCommandsInterval = null;
+let detailUnsub = null;
+let protokollUnsub = null;
 
 const appEl = document.getElementById("app");
 
@@ -38,6 +40,15 @@ function genBefehlsnummer() {
 function genAccessCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
+async function genUniqueAccessCode() {
+  for (let i = 0; i < 25; i++) {
+    const code = genAccessCode();
+    const snap = await db.collection("commands").where("zugriffscode", "==", code).get();
+    const collision = snap.docs.some(d => d.data().status !== "ABGESCHLOSSEN");
+    if (!collision) return code;
+  }
+  throw new Error("Konnte keinen eindeutigen Zugriffscode erzeugen. Bitte erneut versuchen.");
+}
 function genTempPassword() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
   let out = "";
@@ -54,6 +65,7 @@ function fillTemplate(tpl, vars) {
 // ---------- Auth ----------
 auth.onAuthStateChanged(async (user) => {
   stopAllCommandsPolling();
+  stopDetailListeners();
   if (!user) {
     currentUser = null;
     currentProfile = null;
@@ -87,14 +99,8 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 document.addEventListener("submit", (e) => {
-  if (e.target.id === "loginForm") {
-    e.preventDefault();
-    doLogin();
-  }
-  if (e.target.id === "forcePwForm") {
-    e.preventDefault();
-    doForcePasswordChange();
-  }
+  if (e.target.id === "loginForm") { e.preventDefault(); doLogin(); }
+  if (e.target.id === "forcePwForm") { e.preventDefault(); doForcePasswordChange(); }
 });
 
 async function doLogin() {
@@ -132,18 +138,12 @@ async function doForcePasswordChange() {
   }
 }
 
-function logout() {
-  auth.signOut();
-}
+function logout() { auth.signOut(); }
 
 // ---------- Nav / Layout ----------
 function renderNav() {
   const nav = document.getElementById("mainNav");
-  if (!currentProfile) {
-    nav.classList.add("hidden");
-    nav.innerHTML = "";
-    return;
-  }
+  if (!currentProfile) { nav.classList.add("hidden"); nav.innerHTML = ""; return; }
   nav.classList.remove("hidden");
   nav.innerHTML = NAV_ITEMS
     .filter(item => item.roles.includes(currentProfile.role))
@@ -159,7 +159,7 @@ function renderUserBadge() {
 }
 function highlightNav() {
   document.querySelectorAll("#mainNav a").forEach(a => {
-    a.classList.toggle("active", a.dataset.hash === location.hash.split("/").slice(0, 2).join("/"));
+    a.classList.toggle("active", a.dataset.hash === "#/" + location.hash.split("/")[1]);
   });
 }
 
@@ -168,6 +168,10 @@ window.addEventListener("hashchange", route);
 
 function stopAllCommandsPolling() {
   if (allCommandsInterval) { clearInterval(allCommandsInterval); allCommandsInterval = null; }
+}
+function stopDetailListeners() {
+  if (detailUnsub) { detailUnsub(); detailUnsub = null; }
+  if (protokollUnsub) { protokollUnsub(); protokollUnsub = null; }
 }
 
 function guard(roles) {
@@ -179,6 +183,7 @@ function guard(roles) {
 
 function route() {
   stopAllCommandsPolling();
+  stopDetailListeners();
   const hash = location.hash || "#/login";
 
   if (!currentUser) { renderLogin(); return; }
@@ -193,7 +198,7 @@ function route() {
   if (hash === "#/archiv") { if (guard(["hr"])) renderArchive(); return; }
   if (hash === "#/benutzer") { if (guard(["hr"])) renderUserManagement(); return; }
   if (hash === "#/abrufen") { if (guard(["tf", "hr"])) renderRetrieveCommand(); return; }
-  if (hash === "#/meine") { renderMyCommands(); return; }
+  if (hash === "#/meine") { if (guard(["fdl"])) renderMyCommands(); return; }
   if (hash.startsWith("#/befehl/")) { renderCommandDetail(hash.split("/")[2]); return; }
 
   appEl.innerHTML = `<div class="panel"><h2>Seite nicht gefunden</h2></div>`;
@@ -212,21 +217,24 @@ function renderForcePassword() {
 }
 
 // ---------- Dashboard ----------
-async function renderDashboard() {
-  appEl.innerHTML = `<div class="panel fade-in"><h2>Willkommen, ${escapeHtml(currentProfile.username)}</h2>
-    <p>Angemeldet als <strong>${ROLE_LABEL[currentProfile.role]}</strong>. Nutze die Navigation oben, um fortzufahren.</p>
-  </div><div id="statCards" class="grid-cards"></div>`;
-
-  if (currentProfile.role === "fdl" || currentProfile.role === "hr") {
-    try {
-      const snap = await db.collection("commands").get();
-      const counts = { FREIGEGEBEN: 0, STANDORT_GESENDET: 0, STANDORT_BESTAETIGT: 0, QUITTIERT: 0, ABGESCHLOSSEN: 0 };
-      snap.forEach(d => { const s = d.data().status; if (counts[s] !== undefined) counts[s]++; });
-      document.getElementById("statCards").innerHTML = Object.entries(counts).map(([k, v]) => `
-        <div class="stat-card"><div class="num">${v}</div><div class="label">${STATUS_LABEL[k]}</div></div>
-      `).join("");
-    } catch (e) { console.error(e); }
-  }
+function renderDashboard() {
+  const items = NAV_ITEMS.filter(i => i.roles.includes(currentProfile.role) && i.hash !== "#/start");
+  appEl.innerHTML = `
+  <div class="panel fade-in">
+    <h2>Willkommen, ${escapeHtml(currentProfile.username)}</h2>
+    <p style="color:var(--ink-soft); font-size:.9rem;">Angemeldet als <strong>${ROLE_LABEL[currentProfile.role]}</strong>. Das kannst du in dieser Rolle tun:</p>
+  </div>
+  <div class="role-cards">
+    ${items.map(i => `
+      <div class="role-card">
+        <div>
+          <div class="title">${i.label}</div>
+          <div class="desc">${i.desc}</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="location.hash='${i.hash}'">Öffnen</button>
+      </div>
+    `).join("")}
+  </div>`;
 }
 
 // ---------- Befehl erstellen ----------
@@ -234,7 +242,7 @@ function renderCreateCommand() {
   const options = BEFEHLS_KATALOG.map(b => `<option value="${b.nr}">Befehl ${b.nr} - ${escapeHtml(b.titel)}</option>`).join("");
   appEl.innerHTML = `
   <div class="panel fade-in">
-    <h2>Neuen digitalen Befehl erstellen</h2>
+    <h2>Neuen Befehl erstellen</h2>
     <form id="createForm" class="form">
       <label>Zugnummer <input type="text" id="cZug" placeholder="z. B. 31077" required></label>
       <label>Befehlstyp
@@ -244,7 +252,7 @@ function renderCreateCommand() {
         </select>
       </label>
       <p id="cHinweis" class="hint hidden"></p>
-      <label>Standort des Zuges / Betriebsstelle <input type="text" id="cStandort" placeholder="z. B. BHBF vor Signal P3"></label>
+      <label>Standort des Zuges / Betriebsstelle <input type="text" id="cStandort" placeholder="z. B. EF vor Signal P3"></label>
       <div class="form-row">
         <label>Von Signal / Abschnitt <input type="text" id="cVon" placeholder="z. B. Signal P3"></label>
         <label>Bis Signal / Abschnitt <input type="text" id="cBis" placeholder="z. B. Signal X"></label>
@@ -255,76 +263,86 @@ function renderCreateCommand() {
         <label>Gültig ab <input type="datetime-local" id="cGueltigAb"></label>
         <label>Gültig bis <input type="datetime-local" id="cGueltigBis"></label>
       </div>
-      <label>Befehlstext <textarea id="cText" placeholder="Wird nach Auswahl des Befehlstyps automatisch vorgeschlagen."></textarea></label>
+      <label>Befehlstext (anpassbar) <textarea id="cText" placeholder="Wird nach Auswahl des Befehlstyps vorgeschlagen und kann frei bearbeitet werden."></textarea></label>
       <p id="createError" class="error hidden"></p>
       <button type="submit" class="btn btn-primary">Befehl erstellen und freigeben</button>
     </form>
   </div>`;
 
   const fields = ["cZug", "cStandort", "cVon", "cBis", "cGrund", "cGeschwindigkeit"];
+  let textManuallyEdited = false;
+  document.getElementById("cText").addEventListener("input", () => { textManuallyEdited = true; });
+
   function refreshTextSuggestion() {
     const nr = document.getElementById("cTyp").value;
     const b = befehlByNr(nr);
     if (!b) return;
     document.getElementById("cHinweis").textContent = b.hinweis;
     document.getElementById("cHinweis").classList.remove("hidden");
-    document.getElementById("cText").value = fillTemplate(b.text, {
-      zug: document.getElementById("cZug").value || "{zug}",
-      von: document.getElementById("cVon").value || "{von}",
-      bis: document.getElementById("cBis").value || "{bis}",
-      grund: document.getElementById("cGrund").value || "{grund}",
-      geschwindigkeit: document.getElementById("cGeschwindigkeit").value || "{geschwindigkeit}",
-    });
+    if (!textManuallyEdited) {
+      document.getElementById("cText").value = fillTemplate(b.text, {
+        zug: document.getElementById("cZug").value || "{zug}",
+        von: document.getElementById("cVon").value || "{von}",
+        bis: document.getElementById("cBis").value || "{bis}",
+        grund: document.getElementById("cGrund").value || "{grund}",
+        geschwindigkeit: document.getElementById("cGeschwindigkeit").value || "{geschwindigkeit}",
+      });
+    }
   }
-  document.getElementById("cTyp").addEventListener("change", refreshTextSuggestion);
+  document.getElementById("cTyp").addEventListener("change", () => { textManuallyEdited = false; refreshTextSuggestion(); });
   fields.forEach(id => document.getElementById(id).addEventListener("input", refreshTextSuggestion));
 
   document.getElementById("createForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const nr = document.getElementById("cTyp").value;
-    const b = befehlByNr(nr);
-    const data = {
-      befehlsnummer: genBefehlsnummer(),
-      zug: document.getElementById("cZug").value.trim(),
-      typNr: nr,
-      typ: `Befehl ${nr} - ${b.titel}`,
-      standort: document.getElementById("cStandort").value.trim(),
-      von: document.getElementById("cVon").value.trim(),
-      bis: document.getElementById("cBis").value.trim(),
-      grund: document.getElementById("cGrund").value.trim(),
-      geschwindigkeit: document.getElementById("cGeschwindigkeit").value.trim(),
-      gueltigAb: document.getElementById("cGueltigAb").value || null,
-      gueltigBis: document.getElementById("cGueltigBis").value || null,
-      befehlstext: document.getElementById("cText").value.trim(),
-      status: "FREIGEGEBEN",
-      zugriffscode: genAccessCode(),
-      tfStandortMeldung: null, tfStandortZeit: null,
-      fdlBestaetigtZeit: null, fdlNotiz: null,
-      quittiertZeit: null, abgeschlossenZeit: null,
-      createdBy: currentProfile.uid, createdByUsername: currentProfile.username,
-      createdAt: Date.now(),
-    };
+    const submitBtn = e.target.querySelector("button[type=submit]");
+    submitBtn.disabled = true;
+    const errEl = document.getElementById("createError");
+    errEl.classList.add("hidden");
     try {
+      const nr = document.getElementById("cTyp").value;
+      const b = befehlByNr(nr);
+      const code = await genUniqueAccessCode();
+      const data = {
+        befehlsnummer: genBefehlsnummer(),
+        zug: document.getElementById("cZug").value.trim(),
+        typNr: nr,
+        typ: `Befehl ${nr} - ${b.titel}`,
+        standort: document.getElementById("cStandort").value.trim(),
+        von: document.getElementById("cVon").value.trim(),
+        bis: document.getElementById("cBis").value.trim(),
+        grund: document.getElementById("cGrund").value.trim(),
+        geschwindigkeit: document.getElementById("cGeschwindigkeit").value.trim(),
+        gueltigAb: document.getElementById("cGueltigAb").value || null,
+        gueltigBis: document.getElementById("cGueltigBis").value || null,
+        befehlstext: document.getElementById("cText").value.trim(),
+        status: "FREIGEGEBEN",
+        zugriffscode: code,
+        tfStandortMeldung: null, tfStandortZeit: null,
+        fdlBestaetigtZeit: null, fdlNotiz: null,
+        quittiertZeit: null, abgeschlossenZeit: null,
+        createdBy: currentProfile.uid, createdByUsername: currentProfile.username,
+        createdAt: Date.now(),
+      };
       const ref = await db.collection("commands").add(data);
-      await logArchiv(ref.id, data, "Befehl erstellt", "FREIGEGEBEN");
-      await db.collection("users").doc(currentProfile.uid).collection("meine").doc(ref.id).set({ addedAt: Date.now() });
+      await logProtokoll(ref.id, data, "Befehl erstellt und freigegeben", "FREIGEGEBEN");
       location.hash = `#/befehl/${ref.id}`;
     } catch (err) {
-      document.getElementById("createError").textContent = "Fehler: " + (err.message || err);
-      document.getElementById("createError").classList.remove("hidden");
+      errEl.textContent = "Fehler: " + (err.message || err);
+      errEl.classList.remove("hidden");
+      submitBtn.disabled = false;
     }
   });
 }
 
-// ---------- Archiv-Log ----------
-async function logArchiv(commandId, commandData, aktion, status) {
-  await db.collection("archiv").add({
+// ---------- Protokoll-Log (je Statusänderung) ----------
+async function logProtokoll(commandId, commandData, aktion, status) {
+  await db.collection("protokoll").add({
     commandId,
     befehlsnummer: commandData.befehlsnummer,
     zug: commandData.zug,
     typ: commandData.typ,
     status,
-    grund: aktion,
+    aktion,
     benutzer: currentProfile.username,
     zeit: Date.now(),
   });
@@ -372,32 +390,32 @@ async function deleteCommand(id) {
   loadAllCommands();
 }
 
-// ---------- Archiv ----------
+// ---------- Archiv: jeder Befehl genau einmal, mit aktuellem Stand ----------
 async function renderArchive() {
   appEl.innerHTML = `
   <div class="panel fade-in">
     <h2>Archiv</h2>
-    <p class="hint">Das Archiv ist nur lesbar. Archivierte Einträge können hier nicht gelöscht werden.</p>
+    <p class="hint">Das Archiv ist nur lesbar und zeigt jeden Befehl einmal mit seinem aktuellen Stand.</p>
     <div class="table-wrap"><table>
-      <thead><tr><th>#</th><th>Befehlsnummer</th><th>Zug</th><th>Typ</th><th>Status</th><th>Grund</th><th>Von</th><th>Zeit</th></tr></thead>
+      <thead><tr><th>#</th><th>Befehlsnummer</th><th>Zug</th><th>Typ</th><th>Status</th><th>Erstellt von</th><th>Erstellt am</th><th>Aktion</th></tr></thead>
       <tbody id="archivBody"><tr><td colspan="8">Lädt…</td></tr></tbody>
     </table></div>
   </div>`;
   try {
-    const snap = await db.collection("archiv").orderBy("zeit", "desc").limit(300).get();
+    const snap = await db.collection("commands").orderBy("createdAt", "desc").limit(300).get();
     const body = document.getElementById("archivBody");
-    if (snap.empty) { body.innerHTML = `<tr><td colspan="8" class="empty-state">Noch keine Einträge.</td></tr>`; return; }
+    if (snap.empty) { body.innerHTML = `<tr><td colspan="8" class="empty-state">Noch keine Befehle.</td></tr>`; return; }
     body.innerHTML = snap.docs.map((d, i) => {
-      const a = d.data();
+      const c = d.data();
       return `<tr>
         <td>${snap.size - i}</td>
-        <td class="mono">${escapeHtml(a.befehlsnummer)}</td>
-        <td>${escapeHtml(a.zug)}</td>
-        <td>${escapeHtml(a.typ)}</td>
-        <td><span class="status-pill status-${a.status}">${STATUS_LABEL[a.status] || a.status}</span></td>
-        <td>${escapeHtml(a.grund)}</td>
-        <td>${escapeHtml(a.benutzer)}</td>
-        <td>${fmtDate(a.zeit)}</td>
+        <td class="mono">${escapeHtml(c.befehlsnummer)}</td>
+        <td>${escapeHtml(c.zug)}</td>
+        <td>${escapeHtml(c.typ)}</td>
+        <td><span class="status-pill status-${c.status}">${STATUS_LABEL[c.status] || c.status}</span></td>
+        <td>${escapeHtml(c.createdByUsername)}</td>
+        <td>${fmtDate(c.createdAt)}</td>
+        <td><button class="btn btn-primary btn-sm" onclick="location.hash='#/befehl/${d.id}'">Öffnen</button></td>
       </tr>`;
     }).join("");
   } catch (e) { console.error(e); }
@@ -489,7 +507,7 @@ async function loadUserList() {
         <td>${ROLE_LABEL[u.role] || u.role}</td>
         <td>${u.mustChangePassword ? `<span class="status-pill status-STANDORT_GESENDET">Einmal-Passwort aktiv</span>` : `<span class="status-pill status-QUITTIERT">Eigenes Passwort</span>`}</td>
         <td>${fmtDate(u.createdAt)}</td>
-        <td>${protected_ ? `<span class="hint" style="padding:4px 8px;">HR geschützt</span>` : `<button class="btn btn-danger btn-sm" onclick="deleteUserProfile('${d.id}')">Löschen</button>`}</td>
+        <td>${protected_ ? `<span class="hint" style="padding:4px 8px; margin:0;">HR geschützt</span>` : `<button class="btn btn-danger btn-sm" onclick="deleteUserProfile('${d.id}')">Löschen</button>`}</td>
       </tr>`;
     }).join("");
   } catch (e) { console.error(e); }
@@ -500,15 +518,15 @@ async function deleteUserProfile(uid) {
   loadUserList();
 }
 
-// ---------- Befehl abrufen ----------
+// ---------- Befehl abrufen (Tf sucht per Zugnummer + Zugriffscode) ----------
 function renderRetrieveCommand() {
   appEl.innerHTML = `
   <div class="panel fade-in">
     <h2>Befehl abrufen</h2>
-    <p class="hint">Nach dem Abruf bleibt der Befehl 24 Stunden in „Meine Befehle" gespeichert.</p>
+    <p class="hint">Gib die Zugnummer und den vom Fdl mitgeteilten Zugriffscode ein.</p>
     <form id="retrieveForm" class="form">
       <label>Zugnummer <input type="text" id="rZug" placeholder="z. B. 31077" required></label>
-      <label>Zugriffscode <input type="text" id="rCode" placeholder="z. B. 123456" required></label>
+      <label>Zugriffscode (6-stellig) <input type="text" id="rCode" placeholder="z. B. 123456" maxlength="6" required></label>
       <p id="retrieveError" class="error hidden"></p>
       <button type="submit" class="btn btn-primary">Befehl abrufen</button>
     </form>
@@ -527,8 +545,7 @@ function renderRetrieveCommand() {
         return;
       }
       const doc = snap.docs[0];
-      await db.collection("users").doc(currentProfile.uid).collection("meine").doc(doc.id).set({ addedAt: Date.now() });
-      await logArchiv(doc.id, doc.data(), "Tf hat Befehl abgerufen. Zugriff 24 Stunden gespeichert.", doc.data().status);
+      await logProtokoll(doc.id, doc.data(), "Tf hat Befehl abgerufen", doc.data().status);
       location.hash = `#/befehl/${doc.id}`;
     } catch (err) {
       errEl.textContent = "Fehler: " + (err.message || err);
@@ -537,56 +554,62 @@ function renderRetrieveCommand() {
   });
 }
 
-// ---------- Meine Befehle ----------
+// ---------- Meine Befehle (nur Fdl: selbst erstellte Befehle) ----------
 async function renderMyCommands() {
   appEl.innerHTML = `<div class="panel fade-in"><h2>Meine Befehle</h2><div id="myCommandsList">Lädt…</div></div>`;
   try {
-    const snap = await db.collection("users").doc(currentProfile.uid).collection("meine").get();
-    const cutoff = Date.now() - 24 * 3600 * 1000;
-    const validIds = snap.docs.filter(d => d.data().addedAt >= cutoff).map(d => d.id);
-    if (validIds.length === 0) {
-      document.getElementById("myCommandsList").innerHTML = `<div class="empty-state">Keine Befehle in den letzten 24 Stunden.</div>`;
+    const snap = await db.collection("commands").where("createdBy", "==", currentProfile.uid).orderBy("createdAt", "desc").limit(200).get();
+    if (snap.empty) {
+      document.getElementById("myCommandsList").innerHTML = `<div class="empty-state">Du hast noch keine Befehle erstellt.</div>`;
       return;
     }
-    const docs = await Promise.all(validIds.map(id => db.collection("commands").doc(id).get()));
-    const rows = docs.filter(d => d.exists).map(d => {
+    const rows = snap.docs.map(d => {
       const c = d.data();
       return `<tr>
         <td class="mono">${escapeHtml(c.befehlsnummer)}</td>
         <td>${escapeHtml(c.zug)}</td>
         <td>${escapeHtml(c.typ)}</td>
         <td><span class="status-pill status-${c.status}">${STATUS_LABEL[c.status] || c.status}</span></td>
+        <td>${fmtDate(c.createdAt)}</td>
         <td><button class="btn btn-primary btn-sm" onclick="location.hash='#/befehl/${d.id}'">Öffnen</button></td>
       </tr>`;
     }).join("");
     document.getElementById("myCommandsList").innerHTML = `
       <div class="table-wrap"><table>
-        <thead><tr><th>Befehlsnummer</th><th>Zug</th><th>Typ</th><th>Status</th><th>Aktion</th></tr></thead>
+        <thead><tr><th>Befehlsnummer</th><th>Zug</th><th>Typ</th><th>Status</th><th>Erstellt</th><th>Aktion</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
   } catch (e) { console.error(e); }
 }
 
-// ---------- Befehl-Detail ----------
-async function renderCommandDetail(id) {
+// ---------- Befehl-Detail (mit Echtzeit-Updates) ----------
+function renderCommandDetail(id) {
   appEl.innerHTML = `<div class="panel fade-in">Lädt…</div>`;
-  const ref = db.collection("commands").doc(id);
-  const doc = await ref.get();
-  if (!doc.exists) { appEl.innerHTML = `<div class="panel">Befehl nicht gefunden.</div>`; return; }
-  const c = doc.data();
+  stopDetailListeners();
+  detailUnsub = db.collection("commands").doc(id).onSnapshot((doc) => {
+    if (!doc.exists) { appEl.innerHTML = `<div class="panel">Befehl nicht gefunden.</div>`; return; }
+    paintCommandDetail(id, doc.data());
+  }, (err) => console.error(err));
+}
+
+function paintCommandDetail(id, c) {
   const role = currentProfile.role;
 
   let actionsHtml = "";
   if (c.status === "FREIGEGEBEN" && role === "tf") {
     actionsHtml = `
       <div class="command-actions" style="flex-direction:column; align-items:stretch;">
-        <label>Standortmeldung <textarea id="tfStandortInput" placeholder="z. B. Zug ${escapeHtml(c.zug)} steht hinter Signal ${escapeHtml(c.von)}"></textarea></label>
-        <button class="btn btn-accent" onclick="tfSendStandort('${id}')">Standort senden</button>
+        <label style="font-size:.8rem; font-weight:600; color:var(--ink-soft);">Standortmeldung (Freitext, erforderlich)
+          <textarea id="tfStandortInput" placeholder="z. B. Zug ${escapeHtml(c.zug)} steht hinter Signal ${escapeHtml(c.von)}"></textarea>
+        </label>
+        <button class="btn btn-accent" onclick="tfSendStandort('${id}')">Standort bestätigen &amp; senden</button>
       </div>`;
   } else if (c.status === "STANDORT_GESENDET" && (role === "fdl" || role === "hr")) {
     actionsHtml = `
       <div class="command-actions" style="flex-direction:column; align-items:stretch;">
-        <label>FDL-Notiz (optional) <textarea id="fdlNotizInput"></textarea></label>
+        <label style="font-size:.8rem; font-weight:600; color:var(--ink-soft);">Bestätigungsnotiz (optional)
+          <textarea id="fdlNotizInput"></textarea>
+        </label>
         <button class="btn btn-accent" onclick="fdlBestaetigeStandort('${id}')">Standort bestätigen</button>
       </div>`;
   } else if (c.status === "STANDORT_BESTAETIGT" && role === "tf") {
@@ -598,7 +621,7 @@ async function renderCommandDetail(id) {
   appEl.innerHTML = `
   ${(role === "fdl" || role === "hr") ? `
   <div class="panel">
-    <h2 style="font-size:1rem;">Zugriffscode für Tf</h2>
+    <h2 style="font-size:.95rem;">Zugriffscode für Tf</h2>
     <div class="access-code">${escapeHtml(c.zugriffscode)}</div>
   </div>` : ""}
 
@@ -653,20 +676,21 @@ async function renderCommandDetail(id) {
     </table></div>
   </div>`;
 
-  loadProtokoll(id);
+  listenProtokoll(id);
 }
 
-async function loadProtokoll(commandId) {
-  try {
-    const snap = await db.collection("archiv").where("commandId", "==", commandId).orderBy("zeit", "desc").get();
-    const body = document.getElementById("protokollBody");
-    if (!body) return;
-    if (snap.empty) { body.innerHTML = `<tr><td colspan="3" class="empty-state">Keine Einträge.</td></tr>`; return; }
-    body.innerHTML = snap.docs.map(d => {
-      const a = d.data();
-      return `<tr><td>${fmtDate(a.zeit)}</td><td>${escapeHtml(a.benutzer)}</td><td>${escapeHtml(a.grund)}</td></tr>`;
-    }).join("");
-  } catch (e) { console.error(e); }
+function listenProtokoll(commandId) {
+  if (protokollUnsub) { protokollUnsub(); protokollUnsub = null; }
+  protokollUnsub = db.collection("protokoll").where("commandId", "==", commandId)
+    .orderBy("zeit", "desc").onSnapshot((snap) => {
+      const body = document.getElementById("protokollBody");
+      if (!body) return;
+      if (snap.empty) { body.innerHTML = `<tr><td colspan="3" class="empty-state">Keine Einträge.</td></tr>`; return; }
+      body.innerHTML = snap.docs.map(d => {
+        const a = d.data();
+        return `<tr><td>${fmtDate(a.zeit)}</td><td>${escapeHtml(a.benutzer)}</td><td>${escapeHtml(a.aktion)}</td></tr>`;
+      }).join("");
+    }, (err) => console.error(err));
 }
 
 async function tfSendStandort(id) {
@@ -675,30 +699,26 @@ async function tfSendStandort(id) {
   const ref = db.collection("commands").doc(id);
   await ref.update({ status: "STANDORT_GESENDET", tfStandortMeldung: text, tfStandortZeit: Date.now() });
   const doc = await ref.get();
-  await logArchiv(id, doc.data(), "Tf hat Standort gesendet", "STANDORT_GESENDET");
-  renderCommandDetail(id);
+  await logProtokoll(id, doc.data(), "Tf hat Standort gemeldet: " + text, "STANDORT_GESENDET");
 }
 async function fdlBestaetigeStandort(id) {
   const notiz = document.getElementById("fdlNotizInput").value.trim();
   const ref = db.collection("commands").doc(id);
   await ref.update({ status: "STANDORT_BESTAETIGT", fdlBestaetigtZeit: Date.now(), fdlNotiz: notiz || null });
   const doc = await ref.get();
-  await logArchiv(id, doc.data(), "FDL hat Standort bestätigt", "STANDORT_BESTAETIGT");
-  renderCommandDetail(id);
+  await logProtokoll(id, doc.data(), "Fdl hat Standort bestätigt" + (notiz ? ": " + notiz : ""), "STANDORT_BESTAETIGT");
 }
 async function tfQuittieren(id) {
   const ref = db.collection("commands").doc(id);
   await ref.update({ status: "QUITTIERT", quittiertZeit: Date.now() });
   const doc = await ref.get();
-  await logArchiv(id, doc.data(), "Tf hat Befehl quittiert", "QUITTIERT");
-  renderCommandDetail(id);
+  await logProtokoll(id, doc.data(), "Tf hat Befehl quittiert", "QUITTIERT");
 }
 async function fdlAbschliessen(id) {
   const ref = db.collection("commands").doc(id);
   await ref.update({ status: "ABGESCHLOSSEN", abgeschlossenZeit: Date.now() });
   const doc = await ref.get();
-  await logArchiv(id, doc.data(), "Befehl abgeschlossen", "ABGESCHLOSSEN");
-  renderCommandDetail(id);
+  await logProtokoll(id, doc.data(), "Befehl abgeschlossen", "ABGESCHLOSSEN");
 }
 async function deleteCommandAndBack(id) {
   if (!confirm("Diesen Befehl endgültig löschen?")) return;
