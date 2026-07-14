@@ -116,6 +116,7 @@ tr:hover td{background:#fafbfc;}
 .status-STANDORT_BESTAETIGT{background:var(--blue);}
 .status-QUITTIERT{background:var(--green-dark);}
 .status-ABGESCHLOSSEN{background:#1a1e22;}
+.status-UNGUELTIG{background:var(--red);}
 
 .actions-cell{display:flex; gap:6px; flex-wrap:wrap;}
 
