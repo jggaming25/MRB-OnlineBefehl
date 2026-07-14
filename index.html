@@ -3,9 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ONLINE BEFEHL</title>
+<title>Online Befehl</title>
+<meta name="theme-color" content="#14140f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Online Befehl">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -13,14 +20,16 @@
 <div class="shell">
   <aside class="sidebar">
     <div class="brand">
-      <span class="lamp" id="lamp"></span>
+      <img src="icons/icon-192.png" alt="" class="brand-mark">
       <div>
-        <h1>ONLINE BEFEHL</h1>
+        <h1>Online Befehl</h1>
         <p>Betriebsstelle · Simulation</p>
       </div>
     </div>
 
     <nav id="mainNav" class="mainnav hidden"></nav>
+
+    <button id="installBtn" class="btn btn-ghost btn-sm install-btn hidden">App installieren</button>
 
     <div id="userBadge" class="user-badge hidden">
       <div class="user-badge-name" id="userBadgeName"></div>
@@ -33,7 +42,7 @@
 
 <template id="tpl-login">
   <div class="panel panel-narrow fade-in">
-    <p class="disclaimer">ONLINE BEFEHL ist eine fiktive Trainingsumgebung für den Betriebsdienst (Roblox-Simulation). Keine Verwendung im realen Bahnbetrieb.</p>
+    <p class="disclaimer">Online Befehl ist eine fiktive Trainingsumgebung für den Betriebsdienst (Roblox-Simulation). Keine Verwendung im realen Bahnbetrieb.</p>
     <h2>Anmeldung</h2>
     <form id="loginForm" class="form">
       <label>Benutzername
@@ -71,5 +80,26 @@
 <script src="js/firebase-config.js"></script>
 <script src="js/katalog.js"></script>
 <script src="js/app.js"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  }
+  let deferredInstallPrompt = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    document.getElementById("installBtn").classList.remove("hidden");
+  });
+  document.getElementById("installBtn").addEventListener("click", async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    document.getElementById("installBtn").classList.add("hidden");
+  });
+  window.addEventListener("appinstalled", () => {
+    document.getElementById("installBtn").classList.add("hidden");
+  });
+</script>
 </body>
 </html>
