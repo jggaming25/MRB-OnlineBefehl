@@ -20,6 +20,12 @@ function fmtTime(v) {
   if (!v) return "–";
   return new Date(v).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
 }
+// Fdl darf Bahnhöfe/Meldungen immer anlegen, HR nur bei aktivem Dispo-Modus.
+function canManage(kind) {
+  if (kind === "hr") return risProfile.role === "hr" && dispoMode;
+  if (kind === "fdl") return risProfile.role === "fdl" || (risProfile.role === "hr" && dispoMode);
+  return false;
+}
 
 // ---------- Verlauf (Recently viewed, lokal je Gerät) ----------
 function risAddRecent(type, id, label) {
@@ -86,7 +92,8 @@ async function renderUebersicht() {
 
   <div class="ris-grid">
     <div class="panel">
-      <div class="toolbar"><h2>Bahnhöfe</h2>${risProfile.role === "hr" ? `<button class="btn btn-ghost btn-sm" onclick="toggleForm('stationForm')">+ Bahnhof</button>` : ""}</div>
+      <div class="toolbar"><h2>Bahnhöfe</h2>${canManage("hr") ? `<button class="btn btn-ghost btn-sm" onclick="toggleForm('stationForm')">+ Bahnhof</button>` : ""}</div>
+      ${risProfile.role === "hr" && !dispoMode ? `<p class="hint">Aktiviere den Dispo-Modus in der Seitenleiste, um Bahnhöfe anzulegen.</p>` : ""}
       <form id="stationForm" class="form hidden" style="margin-bottom:14px;">
         <div class="form-row">
           <label>Name <input type="text" id="stName" placeholder="z. B. Bergenau Hauptbahnhof" required></label>
@@ -103,43 +110,14 @@ async function renderUebersicht() {
         <input type="text" id="fahrtSearch" placeholder="Zugnummer oder Linie, z. B. RB16 16008">
         <button class="btn btn-primary btn-sm" onclick="doFahrtSearch()">Suchen</button>
       </div>
-      ${(risProfile.role === "fdl" || risProfile.role === "hr") ? `<button class="btn btn-ghost btn-sm" onclick="toggleForm('fahrtForm')" style="margin-bottom:10px;">+ Fahrt anlegen</button>` : ""}
-      <form id="fahrtForm" class="form hidden" style="margin-bottom:14px;">
-        <div class="form-row">
-          <label>Zugnummer <input type="text" id="fZug" placeholder="z. B. RB16 16008" required></label>
-          <label>Linie <input type="text" id="fLinie" placeholder="z. B. RB16"></label>
-        </div>
-        <div class="form-row">
-          <label>Zugtyp <input type="text" id="fTyp" placeholder="z. B. Werratalbahn"></label>
-          <label>Status
-            <select id="fStatus">
-              <option value="normal">Normal</option>
-              <option value="teilausfall">Teilausfall</option>
-              <option value="ausfall">Ausfall</option>
-              <option value="ersatz">Ersatz-/Zusatzfahrt</option>
-            </select>
-          </label>
-        </div>
-        <div class="form-row">
-          <label>Startbahnhof <select id="fStart"></select></label>
-          <label>Zielbahnhof <select id="fZiel"></select></label>
-        </div>
-        <div class="form-row">
-          <label>Abfahrt (Start) <input type="datetime-local" id="fAbfahrt"></label>
-          <label>Ankunft (Ziel) <input type="datetime-local" id="fAnkunft"></label>
-        </div>
-        <div class="form-row">
-          <label>Verspätung (Min.) <input type="number" id="fVerspaetung" value="0" min="0"></label>
-          <label>Verspätungsgrund <input type="text" id="fGrund" placeholder="optional"></label>
-        </div>
-        <button type="submit" class="btn btn-primary btn-sm">Fahrt speichern</button>
-      </form>
+      <p class="hint">Fahrten werden nicht manuell angelegt, sondern folgen künftig automatisch aus der Roblox-Anbindung.</p>
       <div id="fahrtResults"></div>
     </div>
   </div>
 
   <div class="panel">
-    <div class="toolbar"><h2>Meldungen</h2>${(risProfile.role === "fdl" || risProfile.role === "hr") ? `<button class="btn btn-ghost btn-sm" onclick="toggleForm('meldungForm')">+ Meldung</button>` : ""}</div>
+    <div class="toolbar"><h2>Meldungen</h2>${canManage("fdl") ? `<button class="btn btn-ghost btn-sm" onclick="toggleForm('meldungForm')">+ Meldung</button>` : ""}</div>
+    ${risProfile.role === "hr" && !dispoMode ? `<p class="hint">Aktiviere den Dispo-Modus in der Seitenleiste, um Meldungen anzulegen.</p>` : ""}
     <form id="meldungForm" class="form hidden" style="margin-bottom:14px;">
       <div class="form-row">
         <label>Bahnhof / Bereich 1 <input type="text" id="mBf1" placeholder="z. B. Nordtal"></label>
@@ -166,7 +144,8 @@ async function renderUebersicht() {
     </div>
     <div class="panel">
       <h2>Netzübersicht</h2>
-      <div class="map-placeholder">Kartenansicht folgt, sobald Linien hinterlegt sind.</div>
+      <img src="assets/netzkarte.png" alt="Netzkarte" class="netzkarte-img"
+           onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'map-placeholder',textContent:'Netzkarte (assets/netzkarte.png) nicht gefunden.'}))">
     </div>
   </div>
 
@@ -174,7 +153,6 @@ async function renderUebersicht() {
   `;
 
   document.getElementById("stationForm").addEventListener("submit", createStation);
-  document.getElementById("fahrtForm").addEventListener("submit", createFahrt);
   document.getElementById("meldungForm").addEventListener("submit", createMeldung);
   document.getElementById("fahrtSearch").addEventListener("keydown", (e) => { if (e.key === "Enter") doFahrtSearch(); });
 
@@ -197,26 +175,18 @@ async function loadStations() {
   const grid = document.getElementById("stationGrid");
   try {
     const snap = await db.collection("stations").orderBy("name").get();
-    if (snap.empty) { grid.innerHTML = `<div class="empty-state">Noch keine Bahnhöfe eingetragen.</div>`; fillStationSelects([]); return; }
+    if (snap.empty) { grid.innerHTML = `<div class="empty-state">Noch keine Bahnhöfe eingetragen.</div>`; return; }
     const stations = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     grid.innerHTML = stations.map(s => `
       <div class="station-card" onclick="location.hash='#/bahnhof/${s.id}'">
         ${escapeHtml(s.name)}
         <div class="kuerzel">${escapeHtml(s.kuerzel || "")}</div>
       </div>`).join("");
-    fillStationSelects(stations);
   } catch (e) { console.error(e); grid.innerHTML = `<div class="empty-state">Fehler beim Laden.</div>`; }
-}
-function fillStationSelects(stations) {
-  const startEl = document.getElementById("fStart");
-  const zielEl = document.getElementById("fZiel");
-  if (!startEl || !zielEl) return;
-  const opts = stations.map(s => `<option value="${s.id}" data-name="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join("");
-  startEl.innerHTML = opts;
-  zielEl.innerHTML = opts;
 }
 async function createStation(e) {
   e.preventDefault();
+  if (!canManage("hr")) { alert("Dafür muss der Dispo-Modus aktiv sein."); return; }
   const name = document.getElementById("stName").value.trim();
   const kuerzel = document.getElementById("stKuerzel").value.trim();
   if (!name) return;
@@ -233,7 +203,8 @@ async function renderBahnhof(id) {
   const s = doc.data();
   risAddRecent("bahnhof", id, s.name);
 
-  const snap = await db.collection("fahrten").where("bahnhofIds", "array-contains", id).orderBy("abfahrtStart").limit(200).get();
+  const snap = await db.collection("fahrten").where("bahnhofIds", "array-contains", id).limit(200).get();
+  const fahrtDocs = snap.docs.slice().sort((a, b) => (a.data().abfahrtStart || 0) - (b.data().abfahrtStart || 0));
 
   risApp.innerHTML = `
   <div class="panel fade-in">
@@ -245,8 +216,8 @@ async function renderBahnhof(id) {
     <div class="table-wrap"><table>
       <thead><tr><th>Zug</th><th>Start → Ziel</th><th>Abfahrt (Start)</th><th>Ankunft (Ziel)</th><th>Verspätung</th><th>Typ</th></tr></thead>
       <tbody>
-        ${snap.empty ? `<tr><td colspan="6" class="empty-state">Noch keine Zugfahrten für diesen Bahnhof hinterlegt.</td></tr>` :
-          snap.docs.map(d => {
+        ${fahrtDocs.length === 0 ? `<tr><td colspan="6" class="empty-state">Noch keine Zugfahrten für diesen Bahnhof hinterlegt.</td></tr>` :
+          fahrtDocs.map(d => {
             const f = d.data();
             return `<tr style="cursor:pointer;" onclick="location.hash='#/fahrt/${d.id}'">
               <td class="mono">${escapeHtml(f.zugnummer)}</td>
@@ -290,34 +261,6 @@ async function doFahrtSearch() {
   } catch (e) { console.error(e); resultsEl.innerHTML = `<div class="empty-state">Fehler bei der Suche.</div>`; }
 }
 
-async function createFahrt(e) {
-  e.preventDefault();
-  const startSel = document.getElementById("fStart");
-  const zielSel = document.getElementById("fZiel");
-  const startOpt = startSel.selectedOptions[0];
-  const zielOpt = zielSel.selectedOptions[0];
-  if (!startOpt || !zielOpt) { alert("Bitte zuerst mindestens zwei Bahnhöfe anlegen."); return; }
-  const abfahrt = document.getElementById("fAbfahrt").value ? new Date(document.getElementById("fAbfahrt").value).getTime() : null;
-  const ankunft = document.getElementById("fAnkunft").value ? new Date(document.getElementById("fAnkunft").value).getTime() : null;
-  const data = {
-    zugnummer: document.getElementById("fZug").value.trim(),
-    linie: document.getElementById("fLinie").value.trim(),
-    typ: document.getElementById("fTyp").value.trim(),
-    status: document.getElementById("fStatus").value,
-    startBf: startOpt.value, startBfName: startOpt.dataset.name,
-    zielBf: zielOpt.value, zielBfName: zielOpt.dataset.name,
-    bahnhofIds: [startOpt.value, zielOpt.value],
-    abfahrtStart: abfahrt, ankunftZiel: ankunft,
-    verspaetungMin: parseInt(document.getElementById("fVerspaetung").value || "0", 10),
-    verspaetungGrund: document.getElementById("fGrund").value.trim(),
-    createdAt: Date.now(), createdBy: risProfile.username,
-  };
-  await db.collection("fahrten").add(data);
-  document.getElementById("fahrtForm").reset();
-  document.getElementById("fahrtForm").classList.add("hidden");
-  loadSummary();
-}
-
 // ---------- Fahrt-Detail ----------
 async function renderFahrt(id) {
   risApp.innerHTML = `<div class="panel fade-in">Lädt…</div>`;
@@ -358,7 +301,7 @@ async function renderFahrt(id) {
   </div>
 
   <div class="panel">
-    <div class="toolbar"><h2>Anschlüsse</h2><button class="btn btn-ghost btn-sm" onclick="toggleForm('anschlussForm')">+ Anschluss</button></div>
+    <div class="toolbar"><h2>Anschlüsse</h2>${canManage("fdl") ? `<button class="btn btn-ghost btn-sm" onclick="toggleForm('anschlussForm')">+ Anschluss</button>` : ""}</div>
     <form id="anschlussForm" class="form hidden" style="margin-bottom:14px;">
       <div class="form-row">
         <label>Bahnhof <input type="text" id="aBahnhof" placeholder="z. B. Nordtal"></label>
@@ -401,6 +344,7 @@ async function loadAnschluesse(fahrtId) {
 }
 async function createAnschluss(e, fahrtId) {
   e.preventDefault();
+  if (!canManage("fdl")) { alert("Dafür muss (bei HR) der Dispo-Modus aktiv sein."); return; }
   const abfahrt = document.getElementById("aAbfahrt").value ? new Date(document.getElementById("aAbfahrt").value).getTime() : null;
   await db.collection("fahrten").doc(fahrtId).collection("anschluesse").add({
     bahnhof: document.getElementById("aBahnhof").value.trim(),
@@ -439,6 +383,7 @@ async function loadMeldungen() {
 }
 async function createMeldung(e) {
   e.preventDefault();
+  if (!canManage("fdl")) { alert("Dafür muss (bei HR) der Dispo-Modus aktiv sein."); return; }
   const titel = document.getElementById("mTitel").value.trim();
   if (!titel) return;
   await db.collection("meldungen").add({

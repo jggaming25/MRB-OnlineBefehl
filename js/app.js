@@ -102,29 +102,70 @@ auth.onAuthStateChanged(async (user) => {
 document.addEventListener("submit", (e) => {
   if (e.target.id === "loginForm") { e.preventDefault(); doLogin(); }
   if (e.target.id === "forcePwForm") { e.preventDefault(); doForcePasswordChange(); }
-  if (e.target.id === "hrBootstrapForm") { e.preventDefault(); doHrBootstrap(); }
+  if (e.target.id === "hrMasterForm") { e.preventDefault(); checkHrMaster(); }
+  if (e.target.id === "hrCreateForm") { e.preventDefault(); doHrCreate(); }
 });
 
-function toggleHrBootstrap() {
-  document.getElementById("hrBootstrapForm").classList.toggle("hidden");
+function toggleForm(id) {
+  document.getElementById(id).classList.toggle("hidden");
 }
 
 const HR_BOOTSTRAP_EMAIL = "janngenzmann@gmail.com";
 const HR_BOOTSTRAP_PASSWORD = "Tomate2021!";
+let hrMasterValidated = false;
 
-async function doHrBootstrap() {
+// Live per Firestore steuerbar: settings/public -> hrCreateButtonEnabled (boolean).
+// Fehlt das Dokument/Feld, bleibt der Button standardmäßig sichtbar.
+let hrButtonEnabledState = true;
+db.collection("settings").doc("public").onSnapshot((doc) => {
+  hrButtonEnabledState = !(doc.exists && doc.data().hrCreateButtonEnabled === false);
+  const btn = document.getElementById("hrCreateBtn");
+  if (btn) btn.classList.toggle("hidden", !hrButtonEnabledState);
+}, (err) => console.error(err));
+
+function openHrMasterStep() {
+  hrMasterValidated = false;
+  document.getElementById("hrCreateBtn").classList.add("hidden");
+  document.getElementById("hrMasterForm").classList.remove("hidden");
+  document.getElementById("hrCreateForm").classList.add("hidden");
+}
+function closeHrFlow() {
+  hrMasterValidated = false;
+  document.getElementById("hrMasterForm").classList.add("hidden");
+  document.getElementById("hrCreateForm").classList.add("hidden");
+  document.getElementById("hrMasterForm").reset();
+  document.getElementById("hrCreateForm").reset();
+  document.getElementById("hrMasterError").classList.add("hidden");
+  document.getElementById("hrCreateError").classList.add("hidden");
+  const btn = document.getElementById("hrCreateBtn");
+  if (btn) btn.classList.toggle("hidden", !hrButtonEnabledState);
+}
+
+function checkHrMaster() {
   const email = document.getElementById("hrMasterEmail").value.trim();
   const pass = document.getElementById("hrMasterPassword").value;
-  const username = document.getElementById("hrNewUsername").value.trim();
-  const newPassword = document.getElementById("hrNewPassword").value;
-  const errEl = document.getElementById("hrBootstrapError");
+  const errEl = document.getElementById("hrMasterError");
   errEl.classList.add("hidden");
-
   if (email !== HR_BOOTSTRAP_EMAIL || pass !== HR_BOOTSTRAP_PASSWORD) {
     errEl.textContent = "Zugangsdaten ungültig.";
     errEl.classList.remove("hidden");
     return;
   }
+  hrMasterValidated = true;
+  document.getElementById("hrMasterForm").classList.add("hidden");
+  document.getElementById("hrCreateForm").classList.remove("hidden");
+}
+
+async function doHrCreate() {
+  const errEl = document.getElementById("hrCreateError");
+  errEl.classList.add("hidden");
+  if (!hrMasterValidated) {
+    errEl.textContent = "Master-Anmeldung ist abgelaufen. Bitte erneut starten.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  const username = document.getElementById("hrNewUsername").value.trim();
+  const newPassword = document.getElementById("hrNewPassword").value;
   if (!username || newPassword.length < 6) {
     errEl.textContent = "Bitte Benutzernamen und ein Passwort mit mindestens 6 Zeichen angeben.";
     errEl.classList.remove("hidden");
@@ -145,6 +186,7 @@ async function doHrBootstrap() {
       username, role: "hr", mustChangePassword: false,
       createdAt: Date.now(), createdBy: "bootstrap",
     });
+    hrMasterValidated = false;
     // onAuthStateChanged übernimmt Profil-Laden und Weiterleitung ins Dashboard.
   } catch (err) {
     errEl.textContent = "Fehler: " + (err.message || err);
@@ -261,6 +303,8 @@ function renderLogin() {
   document.getElementById("userBadge").classList.add("hidden");
   appEl.innerHTML = "";
   appEl.appendChild(document.getElementById("tpl-login").content.cloneNode(true));
+  const btn = document.getElementById("hrCreateBtn");
+  if (btn) btn.classList.toggle("hidden", !hrButtonEnabledState);
 }
 function renderForcePassword() {
   appEl.innerHTML = "";
@@ -511,6 +555,22 @@ function renderUserManagement() {
       <button type="submit" class="btn btn-primary">Benutzer erstellen</button>
     </form>
     <div id="credentialBox"></div>
+
+    <div style="margin-top:18px;">
+      <a onclick="toggleForm('hrBootstrapInAppForm')" style="font-size:.72rem; color:var(--ink-soft); cursor:pointer; text-decoration:underline dotted;">HR-Konto per Master-Zugangsdaten anlegen/zurücksetzen</a>
+    </div>
+    <form id="hrBootstrapInAppForm" class="form hidden" style="margin-top:10px; padding-top:12px; border-top:1px solid var(--line);">
+      <div class="form-row">
+        <label>Master-E-Mail <input type="text" id="hrMasterEmail2" autocomplete="off"></label>
+        <label>Master-Passwort <input type="password" id="hrMasterPassword2" autocomplete="off"></label>
+      </div>
+      <div class="form-row">
+        <label>Benutzername (HR) <input type="text" id="hrNewUsername2" autocomplete="off"></label>
+        <label>Neues Passwort (mind. 6 Zeichen) <input type="password" id="hrNewPassword2" minlength="6" autocomplete="off"></label>
+      </div>
+      <p id="hrBootstrapError2" class="error hidden"></p>
+      <button type="submit" class="btn btn-ghost btn-sm">HR-Konto anlegen/zurücksetzen</button>
+    </form>
   </div>
   <div class="panel fade-in">
     <h2>Vorhandene Benutzer</h2>
@@ -544,7 +604,56 @@ function renderUserManagement() {
     }
   });
 
+  document.getElementById("hrBootstrapInAppForm").addEventListener("submit", doHrBootstrapInApp);
+
   loadUserList();
+}
+
+async function doHrBootstrapInApp(e) {
+  e.preventDefault();
+  const email = document.getElementById("hrMasterEmail2").value.trim();
+  const pass = document.getElementById("hrMasterPassword2").value;
+  const username = document.getElementById("hrNewUsername2").value.trim();
+  const newPassword = document.getElementById("hrNewPassword2").value;
+  const errEl = document.getElementById("hrBootstrapError2");
+  errEl.classList.add("hidden");
+
+  if (email !== HR_BOOTSTRAP_EMAIL || pass !== HR_BOOTSTRAP_PASSWORD) {
+    errEl.textContent = "Zugangsdaten ungültig.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  if (!username || newPassword.length < 6) {
+    errEl.textContent = "Bitte Benutzernamen und ein Passwort mit mindestens 6 Zeichen angeben.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  try {
+    const accountEmail = username + EMAIL_DOMAIN;
+    const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FIREBASE_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: accountEmail, password: newPassword, returnSecureToken: true }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      if (json.error?.message === "EMAIL_EXISTS") {
+        throw new Error(`Benutzername „${username}" ist bereits vergeben. Ein Passwort-Reset für ein bestehendes Konto ist ohne eigenes Backend nicht sicher möglich – bitte anderen Benutzernamen wählen oder das alte Profil in der Liste unten löschen und neu anlegen.`);
+      }
+      throw new Error(json.error?.message || "Konto konnte nicht erstellt werden.");
+    }
+    // Aktuelle HR-Sitzung bleibt bestehen, da hier direkt mit den eigenen (bereits privilegierten) Rechten geschrieben wird.
+    await db.collection("users").doc(json.localId).set({
+      username, role: "hr", mustChangePassword: false,
+      createdAt: Date.now(), createdBy: "bootstrap-in-app:" + currentProfile.username,
+    });
+    document.getElementById("hrBootstrapInAppForm").reset();
+    document.getElementById("hrBootstrapInAppForm").classList.add("hidden");
+    loadUserList();
+  } catch (err) {
+    errEl.textContent = "Fehler: " + (err.message || err);
+    errEl.classList.remove("hidden");
+  }
 }
 
 async function createUserByHR(username, role) {
@@ -626,16 +735,17 @@ function renderRetrieveCommand() {
   });
 }
 
-// ---------- Meine Befehle (nur Fdl: selbst erstellte Befehle) ----------
+// ---------- Meine Befehle (selbst erstellte Befehle) ----------
 async function renderMyCommands() {
   appEl.innerHTML = `<div class="panel fade-in"><h2>Meine Befehle</h2><div id="myCommandsList">Lädt…</div></div>`;
   try {
-    const snap = await db.collection("commands").where("createdBy", "==", currentProfile.uid).orderBy("createdAt", "desc").limit(200).get();
+    const snap = await db.collection("commands").where("createdBy", "==", currentProfile.uid).limit(200).get();
     if (snap.empty) {
       document.getElementById("myCommandsList").innerHTML = `<div class="empty-state">Du hast noch keine Befehle erstellt.</div>`;
       return;
     }
-    const rows = snap.docs.map(d => {
+    const docs = snap.docs.slice().sort((a, b) => (b.data().createdAt || 0) - (a.data().createdAt || 0));
+    const rows = docs.map(d => {
       const c = d.data();
       return `<tr>
         <td class="mono">${escapeHtml(c.befehlsnummer)}</td>
@@ -651,7 +761,11 @@ async function renderMyCommands() {
         <thead><tr><th>Befehlsnummer</th><th>Zug</th><th>Typ</th><th>Status</th><th>Erstellt</th><th>Aktion</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
-  } catch (e) { console.error(e); }
+  } catch (e) {
+    console.error(e);
+    const el = document.getElementById("myCommandsList");
+    if (el) el.innerHTML = `<div class="empty-state">Fehler beim Laden: ${escapeHtml(e.message || e)}</div>`;
+  }
 }
 
 // ---------- Befehl-Detail (mit Echtzeit-Updates) ----------
@@ -757,15 +871,20 @@ function paintCommandDetail(id, c) {
 function listenProtokoll(commandId) {
   if (protokollUnsub) { protokollUnsub(); protokollUnsub = null; }
   protokollUnsub = db.collection("protokoll").where("commandId", "==", commandId)
-    .orderBy("zeit", "desc").onSnapshot((snap) => {
+    .onSnapshot((snap) => {
       const body = document.getElementById("protokollBody");
       if (!body) return;
       if (snap.empty) { body.innerHTML = `<tr><td colspan="3" class="empty-state">Keine Einträge.</td></tr>`; return; }
-      body.innerHTML = snap.docs.map(d => {
+      const docs = snap.docs.slice().sort((a, b) => (b.data().zeit || 0) - (a.data().zeit || 0));
+      body.innerHTML = docs.map(d => {
         const a = d.data();
         return `<tr><td>${fmtDate(a.zeit)}</td><td>${escapeHtml(a.benutzer)}</td><td>${escapeHtml(a.aktion)}</td></tr>`;
       }).join("");
-    }, (err) => console.error(err));
+    }, (err) => {
+      console.error(err);
+      const body = document.getElementById("protokollBody");
+      if (body) body.innerHTML = `<tr><td colspan="3" class="empty-state">Fehler beim Laden: ${escapeHtml(err.message || err)}</td></tr>`;
+    });
 }
 
 async function tfSendStandort(id) {
