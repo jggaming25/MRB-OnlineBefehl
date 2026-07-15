@@ -1,5 +1,10 @@
-const CACHE = "online-befehl-v1";
-const SHELL = ["./index.html", "./css/style.css", "./js/app.js", "./js/katalog.js", "./js/firebase-config.js"];
+const CACHE = "online-befehl-v8";
+const SHELL = [
+  "./index.html", "./ris.html",
+  "./css/style.css", "./css/ris.css",
+  "./js/app.js", "./js/ris.js", "./js/katalog.js", "./js/firebase-config.js",
+  "./assets/netzkarte.png",
+];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));

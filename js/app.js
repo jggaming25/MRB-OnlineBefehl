@@ -114,14 +114,38 @@ const HR_BOOTSTRAP_EMAIL = "janngenzmann@gmail.com";
 const HR_BOOTSTRAP_PASSWORD = "Tomate2021!";
 let hrMasterValidated = false;
 
-// Live per Firestore steuerbar: settings/public -> hrCreateButtonEnabled (boolean).
-// Fehlt das Dokument/Feld, bleibt der Button standardmäßig sichtbar.
+// Live per Firestore steuerbar: settings/public
+// - hrCreateButtonEnabled (boolean): Create-HR-Account-Button auf der Login-Seite ein-/ausblenden
+// - accessLocked (boolean): Zugriff komplett sperren (z. B. außerhalb von Shift/Training). Betrifft alle Rollen inkl. HR.
 let hrButtonEnabledState = true;
+let accessLocked = false;
 db.collection("settings").doc("public").onSnapshot((doc) => {
-  hrButtonEnabledState = !(doc.exists && doc.data().hrCreateButtonEnabled === false);
+  const data = doc.exists ? doc.data() : {};
+  hrButtonEnabledState = data.hrCreateButtonEnabled !== false;
+  accessLocked = data.accessLocked === true;
   const btn = document.getElementById("hrCreateBtn");
   if (btn) btn.classList.toggle("hidden", !hrButtonEnabledState);
+  if (currentProfile) route();
 }, (err) => console.error(err));
+
+function showLockoutScreen() {
+  document.querySelector(".shell").classList.add("hidden");
+  if (document.getElementById("lockoutOverlay")) return;
+  const overlay = document.createElement("div");
+  overlay.id = "lockoutOverlay";
+  overlay.className = "lockout-overlay";
+  overlay.innerHTML = `
+    <div class="lockout-box">
+      <p>Aktuell wird der Zugriff für FDLs und TFs verweigert, da wir nicht innerhalb einer Shift oder eines Trainings sind! Wenn dies falsch ist, frage den Trainings-/Shift-Host warum das so ist!</p>
+      <a onclick="logout()">Abmelden</a>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function hideLockoutScreen() {
+  const overlay = document.getElementById("lockoutOverlay");
+  if (overlay) overlay.remove();
+  document.querySelector(".shell").classList.remove("hidden");
+}
 
 function openHrMasterStep() {
   hrMasterValidated = false;
@@ -282,6 +306,12 @@ function route() {
   if (!currentUser) { renderLogin(); return; }
   if (!currentProfile) return;
   if (currentProfile.mustChangePassword) { renderForcePassword(); return; }
+
+  if (accessLocked) {
+    showLockoutScreen();
+    return;
+  }
+  hideLockoutScreen();
 
   highlightNav();
 
