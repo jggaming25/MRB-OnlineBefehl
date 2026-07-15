@@ -1,8 +1,9 @@
-const CACHE = "online-befehl-v2";
+const CACHE = "online-befehl-v6";
 const SHELL = [
   "./index.html", "./ris.html",
   "./css/style.css", "./css/ris.css",
   "./js/app.js", "./js/ris.js", "./js/katalog.js", "./js/firebase-config.js",
+  "./assets/netzkarte.png",
 ];
 
 self.addEventListener("install", (e) => {

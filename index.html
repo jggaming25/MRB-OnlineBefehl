@@ -55,16 +55,26 @@
       <button type="submit" class="btn btn-primary">Anmelden</button>
     </form>
 
-    <div style="text-align:center; margin-top:16px;">
-      <a onclick="toggleHrBootstrap()" style="font-size:.68rem; color:#c7cbd1; cursor:pointer; user-select:none;" title="">·</a>
-    </div>
-    <form id="hrBootstrapForm" class="form hidden" style="margin-top:8px; padding-top:12px; border-top:1px solid var(--line);">
-      <label style="font-size:.68rem;">Master-E-Mail <input type="text" id="hrMasterEmail" autocomplete="off"></label>
-      <label style="font-size:.68rem;">Master-Passwort <input type="password" id="hrMasterPassword" autocomplete="off"></label>
-      <label style="font-size:.68rem;">Neuer Benutzername (HR) <input type="text" id="hrNewUsername" autocomplete="off"></label>
-      <label style="font-size:.68rem;">Neues Passwort (mind. 6 Zeichen) <input type="password" id="hrNewPassword" minlength="6" autocomplete="off"></label>
-      <p id="hrBootstrapError" class="error hidden"></p>
-      <button type="submit" class="btn btn-ghost btn-sm">HR-Konto erstellen</button>
+    <button id="hrCreateBtn" type="button" class="btn btn-ghost hidden" style="width:100%; margin-top:14px;" onclick="openHrMasterStep()">Create HR Account</button>
+
+    <form id="hrMasterForm" class="form hidden" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line);">
+      <label>Master-E-Mail <input type="email" id="hrMasterEmail" autocomplete="off" required></label>
+      <label>Master-Passwort <input type="password" id="hrMasterPassword" autocomplete="off" required></label>
+      <p id="hrMasterError" class="error hidden"></p>
+      <div style="display:flex; gap:8px;">
+        <button type="submit" class="btn btn-primary" style="flex:1;">Weiter</button>
+        <button type="button" class="btn btn-ghost" onclick="closeHrFlow()">Abbrechen</button>
+      </div>
+    </form>
+
+    <form id="hrCreateForm" class="form hidden" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line);">
+      <label>Benutzername (neues HR-Konto) <input type="text" id="hrNewUsername" autocomplete="off" required></label>
+      <label>Passwort (mind. 6 Zeichen) <input type="password" id="hrNewPassword" minlength="6" autocomplete="off" required></label>
+      <p id="hrCreateError" class="error hidden"></p>
+      <div style="display:flex; gap:8px;">
+        <button type="submit" class="btn btn-primary" style="flex:1;">HR-Konto erstellen</button>
+        <button type="button" class="btn btn-ghost" onclick="closeHrFlow()">Abbrechen</button>
+      </div>
     </form>
   </div>
 </template>

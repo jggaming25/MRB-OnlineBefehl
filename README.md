@@ -34,6 +34,10 @@ service cloud.firestore {
       allow create: if request.auth != null;
       allow update, delete: if false;
     }
+    match /settings/{id} {
+      allow read: if true;
+      allow write: if request.auth != null && role() == 'hr';
+    }
     match /stations/{sid} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && role() == 'hr';
@@ -56,15 +60,15 @@ service cloud.firestore {
 
 ## 3. Ersten HR-Account anlegen
 
-**Variante A – versteckter Button auf der Login-Seite (empfohlen):**
-Unter dem Login-Formular befindet sich ein kleiner, unauffälliger Punkt (`·`). Klick öffnet ein kleines Zusatzformular:
-- Master-E-Mail: `janngenzmann@gmail.com`
-- Master-Passwort: `Tomate2021!`
-- Neuer Benutzername + neues Passwort frei wählen
+**Variante A – „Create HR Account"-Button auf der Login-Seite (empfohlen):**
+Unter dem Login-Formular ist ein offen sichtbarer Button „Create HR Account". Ablauf:
+1. Klick öffnet Schritt 1: Master-E-Mail (`janngenzmann@gmail.com`) + Master-Passwort (`Tomate2021!`).
+2. Nach „Weiter" öffnet sich Schritt 2: Benutzername + Passwort für das neue HR-Konto frei wählen.
+3. Nach dem Absenden wird das HR-Konto angelegt und man ist sofort eingeloggt.
 
-Nach dem Absenden wird das HR-Konto direkt mit dem gewählten Benutzernamen/Passwort angelegt und man ist sofort eingeloggt.
+**Button live an-/ausschalten:** In Firestore ein Dokument `settings/public` anlegen mit Feld `hrCreateButtonEnabled` (boolean). `false` blendet den Button bei allen offenen/neu geladenen Login-Seiten in Echtzeit aus, `true` (oder Feld/Dokument löschen) blendet ihn wieder ein — ganz ohne neues Deployment.
 
-⚠️ **Sicherheitshinweis:** Die Master-Zugangsdaten liegen im Klartext im JavaScript und sind für jeden im Quelltext sichtbar. Der Schutz besteht nur aus der leicht gelockerten Firestore-Regel (`allow create` bei eigener uid). Technisch versierte Personen könnten diesen Weg umgehen und sich direkt per Firebase-SDK ein Konto mit `role: hr` anlegen, da der Web-API-Key ohnehin öffentlich sichtbar ist. Für ein produktives System bräuchte man eine serverseitige Prüfung (z. B. Cloud Function), was den kostenlosen Spark-Plan sprengt. Für eine Simulation/Ausbildungsumgebung ist das Risiko vertretbar – wer mehr Sicherheit will, sollte Variante B nutzen und den Button aus `index.html`/`app.js` entfernen.
+⚠️ **Sicherheitshinweis:** Die Master-Zugangsdaten liegen im Klartext im JavaScript und sind für jeden im Quelltext sichtbar. Der Schutz besteht nur aus der leicht gelockerten Firestore-Regel (`allow create` bei eigener uid) plus dem Live-Schalter. Technisch versierte Personen könnten diesen Weg umgehen und sich direkt per Firebase-SDK ein Konto mit `role: hr` anlegen, da der Web-API-Key ohnehin öffentlich sichtbar ist — der Schalter blendet nur den Button aus, ändert aber nichts an der zugrunde liegenden Firestore-Regel. Für ein produktives System bräuchte man eine serverseitige Prüfung (z. B. Cloud Function), was den kostenlosen Spark-Plan sprengt. Für eine Simulation/Ausbildungsumgebung ist das Risiko vertretbar – wer mehr Sicherheit will, sollte Variante B nutzen und den Button aus `index.html`/`app.js` entfernen.
 
 **Variante B – manuell über die Firebase-Konsole:**
 1. **Authentication → Users → Add user**: E-Mail `deinname@onlinebefehl.local`, Passwort frei wählen.
@@ -125,7 +129,9 @@ Aktuell sind `fahrten` und `meldungen` bewusst leer – es gibt noch keine autom
 **Vorschlag für die spätere Live-Anbindung an Roblox:** Ein rein statisches GitHub-Pages-Setup kann keine eingehenden Roblox-`HttpService`-Aufrufe sicher entgegennehmen (der Firestore-Web-API-Key ist öffentlich, direkte Schreibrechte für einen Roblox-Server wären ein Sicherheitsrisiko). Sauberer wäre eine kleine Cloud Function (Firebase Blaze-Plan, im kostenlosen Kontingent nutzbar) als Webhook-Endpunkt mit eigenem Geheim-Token: Roblox sendet die aktuellen Zugdaten per `HttpService:PostAsync` an die Function, diese schreibt sie mit Admin-Rechten in `fahrten`. So bleibt der bestehende Client komplett unverändert, es kommt nur eine zusätzliche Datenquelle hinzu.
 
 ## Hinweise / bewusste Vereinfachungen
+- Abfragen, die `where()` mit `orderBy()` auf unterschiedlichen Feldern kombinieren, verlangen in Firestore einen zusammengesetzten Index – ohne ihn bleibt die Seite bei „Lädt…" hängen. Deshalb wird überall dort, wo das vorkommen könnte (z. B. Protokoll, Bahnhof-Fahrten), bewusst ohne `orderBy()` in der Abfrage gearbeitet und stattdessen im Browser sortiert.
+- Bahnhöfe/Meldungen/Anschlüsse anlegen: für **HR** nur bei aktivem Dispo-Modus möglich, für **Fdl** immer. Fahrten werden aktuell **nicht** manuell angelegt – sie sollen später automatisch aus der Roblox-Anbindung kommen.
 - Benutzer löschen entfernt nur das Firestore-Profil (App-Zugriff), nicht den Firebase-Auth-Account – dafür wäre die Admin-SDK/Cloud Functions nötig.
 - "Mit Roblox anmelden" ist nicht enthalten (kein OAuth-Backend verfügbar).
 - Der Befehlskatalog orientiert sich an der aktuellen Systematik der Ril 408 (Befehl 1–14, inkl. Unterpunkt 14.35). Texte sind eigene, frei formulierte Vorschläge – keine Wiedergabe der Original-Vordrucke.
-- Icons in `icons/` sind einfache, selbst erzeugte Platzhalter – können jederzeit durch ein eigenes Logo ersetzt werden (gleiche Dateinamen/Größen).
+- Icons in `icons/` und die Netzkarte in `assets/netzkarte.png` sind einfache, selbst erzeugte Platzhalter – können jederzeit durch eigenes Material ersetzt werden (gleicher Dateiname/Pfad).
